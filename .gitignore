@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+.venv-export/
+n8n_data/
+shared_volume/
+*.analysis.json
+.npucache/
+models/

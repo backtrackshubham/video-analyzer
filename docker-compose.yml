@@ -1,0 +1,43 @@
+name: alienware-video-analyzer
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+      OLLAMA_KEEP_ALIVE: 10m
+    volumes:
+      - ollama_models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  analyzer:
+    build: .
+    image: alien-video-analyzer:local
+    container_name: alien-video-analyzer
+    restart: unless-stopped
+    ports:
+      - "31027:8000"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: qwen2.5vl:3b
+      AUDIO_MODEL: off
+      SAMPLE_FPS: "1.0"
+      MAX_FRAMES: "60"
+      OLLAMA_TIMEOUT: "600"
+    volumes:
+      - ./shared_volume:/data/shared
+    depends_on:
+      - ollama
+
+volumes:
+  ollama_models:

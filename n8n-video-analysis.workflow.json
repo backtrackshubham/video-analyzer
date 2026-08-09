@@ -1,0 +1,114 @@
+{
+  "name": "Video Analysis (Moondream + Gemini)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "00000000-0000-0000-0000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Edit the clipPath below to the video you want to analyze.\n// The path is relative to the shared volume root seen inside the containers (/data/shared).\n// maxFrames caps how many frames get captioned (null = use the analyzer default).\nreturn [{ json: { clipPath: '/data/shared/clips/your-clip.mp4', audio: false, maxFrames: null } }];"
+      },
+      "id": "00000000-0000-0000-0000-000000000002",
+      "name": "Set Clip Path",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-60, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://analyzer:8000/analyze",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"path\": $json.clipPath, \"audio\": $json.audio, \"max_frames\": $json.maxFrames }",
+        "options": {}
+      },
+      "id": "00000000-0000-0000-0000-000000000003",
+      "name": "Analyzer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [140, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const a = $json;\nlet prompt = 'You are analyzing a short video. Below is an ordered sequence of frame captions (with timestamps in seconds) extracted by an AI vision model, plus an optional dialogue transcript.\\n\\nFrame captions in order:\\n';\na.frames.forEach(f => { prompt += `[${f.t}s] ${f.caption}\\n`; });\nif (a.transcript) prompt += `\\nDialogue transcript:\\n${a.transcript}\\n`;\nprompt += '\\nBased on this ordered sequence, write a concise 2-3 sentence summary of what is happening in the video, naming the main subject and setting.\\n';\nreturn [{ json: { clip: a.clip, duration: a.duration, frames: a.frames, transcript: a.transcript, geminiPrompt: prompt } }];"
+      },
+      "id": "00000000-0000-0000-0000-000000000004",
+      "name": "Build Gemini Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [340, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ text: $json.geminiPrompt }] }], generationConfig: { temperature: 0.3 } }) }}",
+        "options": {}
+      },
+      "id": "00000000-0000-0000-0000-000000000005",
+      "name": "Gemini Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [540, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "PLACEHOLDER",
+          "name": "Gemini API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const g = $json.candidates?.[0]?.content?.parts?.map(p => p.text).join(' ') ?? '';\nconst a = $('Build Gemini Prompt').first().json;\nreturn [{ json: { clip: a.clip, duration: a.duration, summary: g.trim(), frames: a.frames, transcript: a.transcript } }];"
+      },
+      "id": "00000000-0000-0000-0000-000000000006",
+      "name": "Extract Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 300]
+    },
+    {
+      "parameters": {
+        "responseBody": "all",
+        "options": {}
+      },
+      "id": "00000000-0000-0000-0000-000000000007",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [940, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Set Clip Path", "type": "main", "index": 0 }]]
+    },
+    "Set Clip Path": {
+      "main": [[{ "node": "Analyzer", "type": "main", "index": 0 }]]
+    },
+    "Analyzer": {
+      "main": [[{ "node": "Build Gemini Prompt", "type": "main", "index": 0 }]]
+    },
+    "Build Gemini Prompt": {
+      "main": [[{ "node": "Gemini Summary", "type": "main", "index": 0 }]]
+    },
+    "Gemini Summary": {
+      "main": [[{ "node": "Extract Summary", "type": "main", "index": 0 }]]
+    },
+    "Extract Summary": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "pinData": {}
+}
