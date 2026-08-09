@@ -4,6 +4,7 @@ openvino-tokenizers==2026.3.0.0
 numpy
 pillow
 huggingface_hub
+python-multipart
 fastapi==0.115.6
 uvicorn==0.32.1
 pydantic==2.10.4

@@ -31,16 +31,30 @@ orchestrator (n8n) can hand the text to a text-LLM (Gemini) for the final
 ## Analyze a clip
 
 ```powershell
-# put clip.mp4 under shared_volume\clips\
-$body = @{ path = "C:\...\video-analyzer-setup\shared_volume\clips\clip.mp4"; audio = $false; max_frames = 60 } | ConvertTo-Json
+# option A: path-based (clip must be under DATA_ROOT, default shared_volume\clips\)
+$body = @{ path = "D:\...\video-analyzer\shared_volume\clips\clip.mp4"; audio = $false; secondsPerFrame = 3.0 } | ConvertTo-Json
 Invoke-RestMethod -Method Post -Uri http://localhost:31027/analyze -ContentType "application/json" -Body $body
+
+# option B: upload the video directly (saved temporarily, removed after)
+curl.exe -X POST http://localhost:31027/analyze/upload `
+  -F "file=@C:\path\to\clip.mp4" `
+  -F "secondsPerFrame=3.0" -F "max_frames=120"
 # -> shared_volume\analysis\clip.analysis.json
 ```
 
+## Sampling & caps
+- `secondsPerFrame` (JSON key) / `secondsPerFrame` (upload form field) sets the
+  frame interval, default **3 s** (`SAMPLE_INTERVAL`). One caption per N
+  seconds: a 6-min clip → ~120 frames.
+- **No default cap** for clips ≤ 10 min (`NO_CAP_DURATION`, default 600s),
+  unless `max_frames` is passed explicitly (which truncates).
+- Clips > 10 min are capped at `MAX_FRAMES` (default 60) unless you pass
+  `max_frames`. Raise `MAX_FRAMES` to sample the whole thing.
+
 ## Expected speed
-NPU frame captioning is roughly **1-3 s/frame** → a 30-60s clip at
-`SAMPLE_FPS=1` (≤60 frames) finishes in **~1-4 min**, vs ~4.6 h on the CPU-only
-dev box.
+NPU frame captioning is roughly **1-3 s/frame**; a 6-min clip at
+`secondsPerFrame=3` (~120 frames) finishes in **~2-6 min**, vs ~9 h on the
+CPU-only dev box.
 
 ## Environment overrides
 | Env var | Default | Purpose |
@@ -50,7 +64,9 @@ dev box.
 | `VLM_MODEL_DIR` | `models\` | Download cache |
 | `VLM_MAX_TOKENS` | `64` | Max caption length |
 | `VLM_GENERATE_HINT` | `FAST_COMPILE` | `FAST_COMPILE` (first-load speed) or `BEST_PERF` (run perf) |
-| `SAMPLE_FPS` / `MAX_FRAMES` | `1.0` / `60` | Sampling |
+| `SAMPLE_INTERVAL` | `3.0` | Seconds between sampled frames |
+| `NO_CAP_DURATION` | `600` | Below this (s) no frame cap applies |
+| `MAX_FRAMES` | `60` | Frame cap for clips above `NO_CAP_DURATION` or explicit `max_frames` |
 | `AUDIO_MODEL` | `off` | faster-whisper size (`tiny`, `off`) |
 | `DATA_ROOT` | `shared_volume` | Where clips + results live |
 

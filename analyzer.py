@@ -13,8 +13,9 @@ MODEL_DIR = os.environ.get("VLM_MODEL_DIR", os.path.join(os.getcwd(), "models"))
 VLM_MODEL = os.environ.get("VLM_MODEL", "0ldev/Qwen2.5-VL-3B-Instruct-ov-nf4-npu")
 VLM_DEVICE = os.environ.get("VLM_DEVICE", "NPU")
 VLM_MAX_TOKENS = int(os.environ.get("VLM_MAX_TOKENS", "64"))
-SAMPLE_FPS = float(os.environ.get("SAMPLE_FPS", "1.0"))
+SAMPLE_INTERVAL = float(os.environ.get("SAMPLE_INTERVAL", "3.0"))
 MAX_FRAMES = int(os.environ.get("MAX_FRAMES", "60"))
+NO_CAP_DURATION = float(os.environ.get("NO_CAP_DURATION", "600"))
 AUDIO_MODEL = os.environ.get("AUDIO_MODEL", "off")
 FRAME_QUESTION = os.environ.get(
     "FRAME_QUESTION",
@@ -127,12 +128,17 @@ class Analyzer:
         self.transcriber = Transcriber(AUDIO_MODEL)
         self.lock = threading.Lock()
 
-    def analyze(self, clip_path, want_audio=False, max_frames=None):
+    def analyze(self, clip_path, want_audio=False, max_frames=None, seconds_per_frame=None):
         data_root = os.path.abspath(DATA_ROOT)
         if not os.path.abspath(clip_path).startswith(data_root + os.sep):
             raise ValueError(f"path must be inside {data_root}")
         if not os.path.isfile(clip_path):
             raise FileNotFoundError(clip_path)
+
+        interval = seconds_per_frame if seconds_per_frame else SAMPLE_INTERVAL
+        if interval <= 0:
+            raise ValueError("secondsPerFrame must be > 0")
+        fps = 1.0 / interval
 
         base = os.path.splitext(os.path.basename(clip_path))[0]
         out_dir = os.path.join(data_root, "analysis")
@@ -142,13 +148,15 @@ class Analyzer:
         duration = get_duration(clip_path)
 
         workdir = tempfile.mkdtemp(prefix="frames_")
-        extract_frames(clip_path, SAMPLE_FPS, workdir)
+        extract_frames(clip_path, fps, workdir)
 
         frame_paths = sorted(
             os.path.join(workdir, f) for f in os.listdir(workdir) if f.endswith(".jpg")
         )
-        if max_frames:
+        if max_frames is not None:
             frame_paths = frame_paths[:max_frames]
+        elif duration > NO_CAP_DURATION:
+            frame_paths = frame_paths[:MAX_FRAMES]
 
         result = {
             "clip": clip_path,
@@ -156,7 +164,8 @@ class Analyzer:
             "duration": round(duration, 2),
             "model": f"openvino:{self.captioner.device}:{self.captioner.model}",
             "device": self.captioner.device,
-            "sample_fps": SAMPLE_FPS,
+            "sample_interval_s": interval,
+            "sample_fps": round(fps, 4),
             "total_frames": len(frame_paths),
             "frames": [],
             "transcript": None,
@@ -164,7 +173,7 @@ class Analyzer:
         }
         try:
             for i, p in enumerate(frame_paths):
-                t = round(i / SAMPLE_FPS, 2)
+                t = round(i * interval, 2)
                 caption = self.captioner.caption(p)
                 result["frames"].append({"t": t, "caption": caption})
                 result["status"] = "running"

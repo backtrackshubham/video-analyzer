@@ -1,6 +1,9 @@
+import os
+import shutil
 import threading
+import uuid
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from analyzer import Analyzer, DATA_ROOT
@@ -14,6 +17,12 @@ class AnalyzeRequest(BaseModel):
     path: str
     audio: bool = False
     max_frames: int | None = None
+    secondsPerFrame: float | None = None
+
+
+def _acquire():
+    if not busy.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="an analysis is already in progress")
 
 
 @app.get("/health")
@@ -23,11 +32,15 @@ def health():
 
 @app.post("/analyze")
 def analyze(req: AnalyzeRequest):
-    if not busy.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail="an analysis is already in progress")
+    _acquire()
     try:
         try:
-            return analyzer.analyze(req.path, want_audio=req.audio, max_frames=req.max_frames)
+            return analyzer.analyze(
+                req.path,
+                want_audio=req.audio,
+                max_frames=req.max_frames,
+                seconds_per_frame=req.secondsPerFrame,
+            )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         except FileNotFoundError as e:
@@ -36,9 +49,43 @@ def analyze(req: AnalyzeRequest):
         busy.release()
 
 
-if __name__ == "__main__":
-    import os
+@app.post("/analyze/upload")
+def analyze_upload(
+    file: UploadFile = File(...),
+    audio: bool = Form(False),
+    max_frames: int | None = Form(None),
+    secondsPerFrame: float | None = Form(None),
+):
+    _acquire()
+    tmp_path = None
+    try:
+        upload_dir = os.path.join(DATA_ROOT, "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        safe = os.path.basename(file.filename or "clip")
+        tmp_path = os.path.join(upload_dir, uuid.uuid4().hex[:12] + "_" + safe)
+        with open(tmp_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        try:
+            return analyzer.analyze(
+                tmp_path,
+                want_audio=audio,
+                max_frames=max_frames,
+                seconds_per_frame=secondsPerFrame,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    finally:
+        busy.release()
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
+
+if __name__ == "__main__":
     import uvicorn
 
     port = int(os.environ.get("ANALYZER_PORT", "31027"))
