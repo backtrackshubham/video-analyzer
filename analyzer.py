@@ -49,7 +49,16 @@ def resolve_model_dir(spec, cache_dir=MODEL_DIR):
         return local
     from huggingface_hub import snapshot_download
 
-    return snapshot_download(repo_id=spec, local_dir=local)
+    last_err = None
+    for endpoint in (os.environ.get("HF_ENDPOINT", "https://huggingface.co"), "https://hf-mirror.com"):
+        os.environ["HF_ENDPOINT"] = endpoint
+        os.environ["HF_HUB_DISABLE_XET"] = "1"
+        try:
+            return snapshot_download(repo_id=spec, local_dir=local)
+        except Exception as e:
+            last_err = e
+            print(f"model download failed via {endpoint}: {type(e).__name__}: {e}", flush=True)
+    raise RuntimeError(f"could not download model {spec}: {last_err}")
 
 
 class NPUVlmCaptioner:
