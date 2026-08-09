@@ -15,7 +15,7 @@ orchestrator (n8n) can hand the text to a text-LLM (Gemini) for the final
 - Whisper (faster-whisper, int8 CPU) for audio; defaults to `off`
 
 ## Prerequisites (Windows)
-1. Python 3.11 on PATH (`winget install Python.Python.3.11`)
+1. Python 3.11+ on PATH (verified with 3.13.12) — `winget install Python.Python.3.13`
 2. FFmpeg on PATH (`winget install Gyan.FFmpeg`) — needed for `ffprobe`/`ffmpeg`
 3. Latest **Intel NPU driver** (Windows Update usually handles it)
 4. Git (`winget install Git.Git`)
