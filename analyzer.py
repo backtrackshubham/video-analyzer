@@ -90,18 +90,14 @@ class NPUVlmCaptioner:
         return {"device": self.device, "model": self.model, "model_path": self.model_path}
 
     def caption(self, image_path, prompt=FRAME_QUESTION):
-        import openvino_genai as genai
+        import openvino as ov
 
-        pil_img = Image.open(image_path).convert("RGB")
-        ov_img = self.np.array(pil_img)
+        pil = Image.open(image_path).convert("RGB")
+        img_tensor = ov.Tensor(self.np.array(pil))
         try:
-            ov_img = genai.Image(ov_img)
-        except Exception:
-            pass
-        try:
-            out = self.pipe.generate(prompt, images=[ov_img], generation_config=self.gen_cfg)
+            out = self.pipe.generate(prompt, images=[img_tensor], generation_config=self.gen_cfg)
         except TypeError:
-            out = self.pipe.generate(prompt, [ov_img], self.gen_cfg)
+            out = self.pipe.generate(prompt, [img_tensor], self.gen_cfg)
         return str(out).strip()
 
 
