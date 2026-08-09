@@ -70,13 +70,16 @@ class NPUVlmCaptioner:
         self.model = model
         self.model_path = resolve_model_dir(model)
         self.device = device
+        hint = os.environ.get("VLM_GENERATE_HINT", "FAST_COMPILE")
+        print(f"[npu] compiling {self.model} on {self.device} (hint={hint})...", flush=True)
         self.pipeline_config = {
-            "GENERATE_HINT": "BEST_PERF",
+            "GENERATE_HINT": hint,
             "MAX_PROMPT_LEN": 4096,
             "MIN_RESPONSE_LEN": 256,
             "CACHE_DIR": os.path.join(self.model_path, ".npucache"),
         }
         self.pipe = genai.VLMPipeline(self.model_path, self.device, **self.pipeline_config)
+        print("[npu] pipeline ready", flush=True)
         self.gen_cfg = genai.GenerationConfig()
         self.gen_cfg.max_new_tokens = VLM_MAX_TOKENS
         self.gen_cfg.min_new_tokens = 2

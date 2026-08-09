@@ -49,6 +49,7 @@ dev box.
 | `VLM_MODEL` | `0ldev/Qwen2.5-VL-3B-Instruct-ov-nf4-npu` | HF repo id or local dir |
 | `VLM_MODEL_DIR` | `models\` | Download cache |
 | `VLM_MAX_TOKENS` | `64` | Max caption length |
+| `VLM_GENERATE_HINT` | `FAST_COMPILE` | `FAST_COMPILE` (first-load speed) or `BEST_PERF` (run perf) |
 | `SAMPLE_FPS` / `MAX_FRAMES` | `1.0` / `60` | Sampling |
 | `AUDIO_MODEL` | `off` | faster-whisper size (`tiny`, `off`) |
 | `DATA_ROOT` | `shared_volume` | Where clips + results live |
