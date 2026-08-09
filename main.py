@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from analyzer import Analyzer, DATA_ROOT
 
-app = FastAPI(title="Video Analyzer")
+app = FastAPI(title="Video Analyzer (NPU / OpenVINO)")
 analyzer = Analyzer()
 busy = threading.Lock()
 
@@ -18,11 +18,7 @@ class AnalyzeRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-        "model": analyzer.vision.__class__.__name__,
-        "data_root": DATA_ROOT,
-    }
+    return {"status": "ok", "inference": analyzer.captioner.health(), "data_root": DATA_ROOT}
 
 
 @app.post("/analyze")
