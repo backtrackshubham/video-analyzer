@@ -1,32 +1,36 @@
-# Video Analyzer — Alienware (GPU / Ollama)
+# Video Analyzer — Mac/Dev laptop (CPU / Moondream)
 
 FastAPI service that samples a short clip (30-60s), captions every frame with a
-local vision model, and writes an ordered `{t, caption}` array into
-`shared_volume/analysis/{clip}.analysis.json` so an orchestrator (n8n) can hand
-the text to a text-LLM (Gemini) for the final "what's happening" summary.
+local Moondream vision model (CPU, no GPU), and writes an ordered
+`{t, caption}` array into `shared_volume/analysis/{clip}.analysis.json` so an
+orchestrator (n8n) can hand the text to a text-LLM (Gemini) for the final
+"what's happening" summary.
 
 ## Device
-- Alienware desktop, Linux, NVIDIA GPU (RTX 3060 6GB)
-- Vision backend: **Ollama + `qwen2.5vl:3b`** (Q4 ~2.5GB, GPU offloaded)
-- Whisper (faster-whisper) transcribes audio (defaults to `off`)
+- i5-5350U (4 cores, 8GB RAM), no GPU — dev/unit-test box only
+- Vision backend: **Moondream2** via transformers, revision `2025-01-09`
+  (this machine cannot run gigabytes of RAM easily; keep `SAMPLE_FPS` low)
+- Whisper (faster-whisper) transcribes audio (defaults to `tiny`)
+
+## ⚠️ Performance reality
+Measured on this CPU: ~4.6 min/frame (encode-bound). A 60-frame clip is
+~4.6h. Keep `MAX_FRAMES` small (e.g. 6-12) for anything interactive, or use
+the Alienware/NPU branches for real work.
 
 ## Files
 | File | Purpose |
 | --- | --- |
-| `analyzer.py` | Ollama captioner, frame extraction, analysis pipeline |
+| `analyzer.py` | Moondream captioner, frame extraction, analysis pipeline |
 | `main.py` | FastAPI app (`GET /health`, `POST /analyze`) |
-| `requirements.txt` | Python deps for the analyzer container |
-| `Dockerfile` | Analyzer container (no torch; talks to Ollama over HTTP) |
-| `docker-compose.yml` | `ollama` (GPU-reserved) + `analyzer` (:31027) |
-| `pull_model.sh` | Waits for Ollama, pulls `qwen2.5vl:3b` |
+| `requirements.txt` | Python deps (torch CPU + transformers 4.49.0) |
+| `Dockerfile` | Analyzer container (CPU torch wheel) |
+| `docker-compose.yml` | `analyzer` (:31027) + model cache volume |
 | `n8n-video-analysis.workflow.json` | Orchestration workflow import |
 
-## Run (Linux + Docker + NVIDIA container toolkit)
+## Run (Linux + Docker)
 
 ```bash
 docker compose up -d --build
-./pull_model.sh                                  # once, pulls the VLM
-docker compose logs -f analyzer                  # watch startup
 curl localhost:31027/health
 ```
 
@@ -36,9 +40,9 @@ curl localhost:31027/health
 cp /path/to/clip.mp4 shared_volume/clips/
 curl -X POST localhost:31027/analyze \
   -H 'Content-Type: application/json' \
-  -d '{"path": "/data/shared/clips/clip.mp4", "audio": false, "max_frames": 60}'
+  -d '{"path": "/data/shared/clips/clip.mp4", "audio": true, "max_frames": 6}'
 # -> shared_volume/analysis/clip.analysis.json
 ```
 
-Tunables: `OLLAMA_MODEL`, `OLLAMA_HOST`, `SAMPLE_FPS`, `MAX_FRAMES`,
-`OLLAMA_TIMEOUT`, `FRAME_QUESTION`.
+Tunables: `VISION_MODEL` (`moondream2` | `qwen2.5-vl-3b`), `MOONDREAM_REVISION`,
+`VISION_MAX_CROPS`, `SAMPLE_FPS`, `MAX_FRAMES`, `CAPTION_MAX_TOKENS`, `AUDIO_MODEL`.

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from analyzer import Analyzer, DATA_ROOT
 
-app = FastAPI(title="Video Analyzer (Alienware / Ollama)")
+app = FastAPI(title="Video Analyzer")
 analyzer = Analyzer()
 busy = threading.Lock()
 
@@ -18,11 +18,9 @@ class AnalyzeRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    info = analyzer.captioner.health()
     return {
-        "status": "ok" if info["reachable"] else "degraded",
-        "model": analyzer.captioner.model,
-        "ollama": info,
+        "status": "ok",
+        "model": analyzer.vision.__class__.__name__,
         "data_root": DATA_ROOT,
     }
 

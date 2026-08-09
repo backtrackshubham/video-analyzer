@@ -1,31 +1,20 @@
-import base64
 import json
 import os
 import subprocess
 import tempfile
 import threading
-import time
 
-import requests
+from PIL import Image
 
 DATA_ROOT = os.environ.get("DATA_ROOT", "/data/shared")
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:3b")
-OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "600"))
+VISION_MODEL = os.environ.get("VISION_MODEL", "moondream2")
+MOONDREAM_REVISION = os.environ.get("MOONDREAM_REVISION", "2025-01-09")
+VISION_MAX_CROPS = int(os.environ.get("VISION_MAX_CROPS", "1"))
 SAMPLE_FPS = float(os.environ.get("SAMPLE_FPS", "1.0"))
 MAX_FRAMES = int(os.environ.get("MAX_FRAMES", "60"))
-AUDIO_MODEL = os.environ.get("AUDIO_MODEL", "off")
-FRAME_QUESTION = os.environ.get(
-    "FRAME_QUESTION",
-    "Analyze this video frame. Describe the scene concisely: main subject, "
-    "objects, people, actions, setting, and any visible text. Keep it to 1-2 "
-    "sentences, factual and specific.",
-)
-GENERATION_OPTIONS = {
-    "temperature": 0.3,
-    "top_p": 0.9,
-    "num_gpu": -1,
-}
+AUDIO_MODEL = os.environ.get("AUDIO_MODEL", "tiny")
+FRAME_QUESTION = "Describe what is visible in this video frame in one sentence."
+CAPTION_MAX_TOKENS = int(os.environ.get("CAPTION_MAX_TOKENS", "48"))
 
 
 def run(cmd):
@@ -37,49 +26,84 @@ def get_duration(video_path):
     return float(json.loads(out.stdout)["format"]["duration"])
 
 
-def extract_frames(video_path, fps, outdir):
-    run(["ffmpeg", "-v", "error", "-i", video_path, "-vf", f"fps={fps}", "-q:v", "2", f"{outdir}/%05d.jpg"])
+def extract_frame(video_path, t, out_path):
+    run(["ffmpeg", "-ss", str(max(0.0, t)), "-i", video_path, "-frames:v", "1", "-q:v", "2", out_path])
+    return os.path.exists(out_path)
 
 
-def img_b64(path):
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("ascii")
+def sample_times(duration):
+    step = 1.0 / SAMPLE_FPS
+    times = []
+    t = 0.0
+    while t < duration and len(times) < MAX_FRAMES:
+        times.append(round(t, 2))
+        t += step
+    return times
 
 
-class OllamaCaptioner:
-    def __init__(self, host=OLLAMA_HOST, model=OLLAMA_MODEL):
-        self.host = host
-        self.model = model
+class VisionModel:
+    def caption(self, image_path, question, max_new_tokens=CAPTION_MAX_TOKENS):
+        raise NotImplementedError
 
-    def health(self):
+
+class MoondreamModel(VisionModel):
+    def __init__(self):
+        import torch
+
+        torch.compile = lambda fn, **kwargs: fn
+
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+
+        model_id = "vikhyatk/moondream2"
+        cfg = AutoConfig.from_pretrained(model_id, revision=MOONDREAM_REVISION, trust_remote_code=True)
+        cfg.config = dict(getattr(cfg, "config", {}) or {})
+        cfg.config["vision"] = {"max_crops": VISION_MAX_CROPS}
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_id, revision=MOONDREAM_REVISION, trust_remote_code=True, config=cfg
+        )
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id, revision=MOONDREAM_REVISION)
+        self.model.eval()
+
+    def caption(self, image_path, question, max_new_tokens=CAPTION_MAX_TOKENS):
+        img = Image.open(image_path).convert("RGB")
+        enc = self.model.encode_image(img)
+        return self.model.answer_question(enc, question, self.tokenizer, max_new_tokens=max_new_tokens).strip()
+
+
+class QwenVlModel(VisionModel):
+    def __init__(self, model_id="Qwen/Qwen2.5-VL-3B-Instruct"):
         try:
-            r = requests.get(f"{self.host}/api/tags", timeout=10)
-            r.raise_for_status()
-            tags = [m["name"] for m in r.json().get("models", [])]
-            return {"reachable": True, "model": self.model, "loaded": self.model in tags}
-        except Exception as e:
-            return {"reachable": False, "error": str(e)}
+            from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+        except ImportError:
+            raise RuntimeError("Qwen2.5-VL requires torchvision; install it and rebuild")
+        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            model_id, trust_remote_code=True, torch_dtype="auto", device_map="cpu"
+        )
+        self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 
-    def caption(self, image_path, question=FRAME_QUESTION):
-        payload = {
-            "model": self.model,
-            "prompt": question,
-            "images": [img_b64(image_path)],
-            "stream": False,
-            "options": GENERATION_OPTIONS,
-        }
-        last_err = None
-        for attempt in range(3):
-            try:
-                r = requests.post(f"{self.host}/api/generate", json=payload, timeout=OLLAMA_TIMEOUT)
-                r.raise_for_status()
-                text = r.json().get("response", "").strip()
-                if text:
-                    return text
-            except Exception as e:
-                last_err = e
-                time.sleep(2 * (attempt + 1))
-        raise RuntimeError(f"ollama caption failed: {last_err}")
+    def caption(self, image_path, question, **kwargs):
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": image_path},
+                    {"type": "text", "text": question},
+                ],
+            }
+        ]
+        text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = self.processor(text=[text], images=[Image.open(image_path).convert("RGB")], return_tensors="pt")
+        gen = self.model.generate(**inputs, max_new_tokens=64)
+        out = self.processor.batch_decode(gen, skip_special_tokens=True)[0]
+        return out.replace(text, "").strip()
+
+
+def build_vision_model():
+    if VISION_MODEL == "qwen2.5-vl-3b":
+        return QwenVlModel()
+    if VISION_MODEL == "moondream2":
+        return MoondreamModel()
+    raise ValueError(f"unsupported VISION_MODEL: {VISION_MODEL}")
 
 
 class Transcriber:
@@ -91,7 +115,7 @@ class Transcriber:
         if self.model is None and self.size not in ("off", "", "none"):
             from faster_whisper import WhisperModel
 
-            self.model = WhisperModel(self.size, device="auto", compute_type="int8")
+            self.model = WhisperModel(self.size, device="cpu", compute_type="int8")
 
     def transcribe(self, video_path):
         self.ensure()
@@ -104,7 +128,7 @@ class Transcriber:
 
 class Analyzer:
     def __init__(self):
-        self.captioner = OllamaCaptioner()
+        self.vision = build_vision_model()
         self.transcriber = Transcriber(AUDIO_MODEL)
         self.lock = threading.Lock()
 
@@ -120,34 +144,31 @@ class Analyzer:
         analysis_file = os.path.join(out_dir, base + ".analysis.json")
 
         duration = get_duration(clip_path)
+        times = sample_times(duration)
+        if max_frames:
+            times = times[:max_frames]
 
         workdir = tempfile.mkdtemp(prefix="frames_")
-        extract_frames(clip_path, SAMPLE_FPS, workdir)
-
-        frame_paths = sorted(
-            os.path.join(workdir, f) for f in os.listdir(workdir) if f.endswith(".jpg")
-        )
-        if max_frames:
-            frame_paths = frame_paths[:max_frames]
-
         result = {
             "clip": clip_path,
             "analysis_file": analysis_file,
             "duration": round(duration, 2),
-            "model": f"ollama:{self.captioner.model}",
+            "model": VISION_MODEL,
             "sample_fps": SAMPLE_FPS,
-            "total_frames": len(frame_paths),
+            "total_frames": len(times),
             "frames": [],
             "transcript": None,
             "status": "running",
         }
         try:
-            for i, p in enumerate(frame_paths):
-                t = round(i / SAMPLE_FPS, 2)
-                caption = self.captioner.caption(p)
+            for i, t in enumerate(times):
+                p = os.path.join(workdir, f"f{i:04d}.jpg")
+                if not extract_frame(clip_path, min(t, max(0.0, duration - 0.1)), p):
+                    continue
+                caption = self.vision.caption(p, FRAME_QUESTION)
                 result["frames"].append({"t": t, "caption": caption})
                 result["status"] = "running"
-                print(f"frame {i + 1}/{len(frame_paths)} t={t}s done", flush=True)
+                print(f"frame {i + 1}/{len(times)} t={t}s done", flush=True)
                 self._save(result)
         finally:
             for fname in os.listdir(workdir):
