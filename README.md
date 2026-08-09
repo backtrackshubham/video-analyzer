@@ -9,9 +9,9 @@ orchestrator (n8n) can hand the text to a text-LLM (Gemini) for the final
 ## Device
 - HP Omnibook, Intel Core Ultra 7 (Meteor Lake or Lunar Lake), 16GB RAM
 - Vision backend: **OpenVINO GenAI `VLMPipeline`** on device `"NPU"`
-  - `llmware/qwen2-vl-2b-instruct-ov` (INT4, works on Meteor Lake *and* Lunar Lake) — default
-  - `0ldev/Qwen2.5-VL-3B-Instruct-ov-nf4-npu` (NF4, **Lunar Lake only**) — optionally
-    set `VLM_MODEL` to it for slightly better accuracy
+  - `0ldev/Qwen2.5-VL-3B-Instruct-ov-nf4-npu` (NF4, GenAI-ready) — default.
+    **Requires Core Ultra Series 2 (Lunar Lake) NPU or newer.**
+  - Meteor Lake NPU → export your own INT4 checkpoint: `.\export_model.ps1`
 - Whisper (faster-whisper, int8 CPU) for audio; defaults to `off`
 
 ## Prerequisites (Windows)
@@ -46,7 +46,7 @@ dev box.
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `VLM_DEVICE` | `NPU` | OpenVINO device (`NPU`, `GPU`, `CPU`) |
-| `VLM_MODEL` | `llmware/qwen2-vl-2b-instruct-ov` | HF repo id or local dir |
+| `VLM_MODEL` | `0ldev/Qwen2.5-VL-3B-Instruct-ov-nf4-npu` | HF repo id or local dir |
 | `VLM_MODEL_DIR` | `models\` | Download cache |
 | `VLM_MAX_TOKENS` | `64` | Max caption length |
 | `SAMPLE_FPS` / `MAX_FRAMES` | `1.0` / `60` | Sampling |
@@ -58,9 +58,10 @@ dev box.
   dir's `.npucache`.
 - If the analyzer runs OOM-flaky on a Core Ultra Series 2 (200V) machine, set
   `DISABLE_OPENVINO_GENAI_NPU_L0=1` before `run.ps1`.
-- Alternatively on Lunar Lake, `0ldev/Qwen2.5-VL-3B-Instruct-ov-nf4-npu`:
-  `pull_model.ps1 0ldev/Qwen2.5-VL-3B-Instruct-ov-nf4-npu` then
-  `$env:VLM_MODEL="0ldev/Qwen2.5-VL-3B-Instruct-ov-nf4-npu"`.
+- Alternatively on Lunar Lake you can pull the default NF4/Qwen2.5-VL-3B
+  checkpoint explicitly: `.\pull_model.ps1 0ldev/Qwen2.5-VL-3B-Instruct-ov-nf4-npu`
+  (`.pull_model.ps1` validates the download looks like a GenAI VLM before
+  reporting success).
 - To export your own checkpoint (`Qwen2-VL-2B-Instruct`, INT4): `.\export_model.ps1`.
 - n8n runs on another host and calls the analyzer at `<this-host>:31027`;
   keep the shared volume reachable over the network (e.g. SMB share) so both

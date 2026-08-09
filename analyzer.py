@@ -10,7 +10,7 @@ from PIL import Image
 DEFAULT_DATA_ROOT = "shared_volume" if os.name == "nt" else "/data/shared"
 DATA_ROOT = os.environ.get("DATA_ROOT", DEFAULT_DATA_ROOT)
 MODEL_DIR = os.environ.get("VLM_MODEL_DIR", os.path.join(os.getcwd(), "models"))
-VLM_MODEL = os.environ.get("VLM_MODEL", "llmware/qwen2-vl-2b-instruct-ov")
+VLM_MODEL = os.environ.get("VLM_MODEL", "0ldev/Qwen2.5-VL-3B-Instruct-ov-nf4-npu")
 VLM_DEVICE = os.environ.get("VLM_DEVICE", "NPU")
 VLM_MAX_TOKENS = int(os.environ.get("VLM_MAX_TOKENS", "64"))
 SAMPLE_FPS = float(os.environ.get("SAMPLE_FPS", "1.0"))
@@ -35,11 +35,17 @@ def extract_frames(video_path, fps, outdir):
     run(["ffmpeg", "-v", "error", "-i", video_path, "-vf", f"fps={fps}", "-q:v", "2", os.path.join(outdir, "%05d.jpg")])
 
 
+def is_model_dir(path):
+    return os.path.exists(os.path.join(path, "openvino_config.json")) or os.path.exists(
+        os.path.join(path, "openvino_model.xml")
+    )
+
+
 def resolve_model_dir(spec, cache_dir=MODEL_DIR):
-    if os.path.isdir(spec) and os.path.exists(os.path.join(spec, "openvino_model.xml")):
+    if os.path.isdir(spec) and is_model_dir(spec):
         return spec
     local = os.path.abspath(os.path.join(cache_dir, os.path.basename(spec)))
-    if os.path.exists(os.path.join(local, "openvino_model.xml")):
+    if os.path.isdir(local) and is_model_dir(local):
         return local
     from huggingface_hub import snapshot_download
 
@@ -64,6 +70,7 @@ class NPUVlmCaptioner:
         self.pipe = genai.VLMPipeline(self.model_path, self.device, self.pipeline_config)
         self.gen_cfg = genai.GenerationConfig()
         self.gen_cfg.max_new_tokens = VLM_MAX_TOKENS
+        self.gen_cfg.min_new_tokens = 2
         self.gen_cfg.temperature = 0.3
         self.gen_cfg.top_p = 0.9
 

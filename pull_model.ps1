@@ -1,7 +1,8 @@
 # Download a pre-exported OpenVINO vision-language checkpoint for the NPU.
-# Defaults to an INT4 variant that runs on both Meteor Lake and Lunar Lake NPUs.
+# Default (NF4) requires a Core Ultra Series 2 (Lunar Lake) NPU or newer.
+# For older Meteor Lake NPUs use an INT4 export (see export_model.ps1).
 param(
-    [string]$Repo = "llmware/qwen2-vl-2b-instruct-ov",
+    [string]$Repo = "0ldev/Qwen2.5-VL-3B-Instruct-ov-nf4-npu",
     [string]$OutDir = "$PSScriptRoot\models"
 )
 
@@ -21,6 +22,13 @@ $target = Join-Path $OutDir ([IO.Path]::GetFileName($Repo))
 $env:HF_REPO = $Repo
 $env:HF_TARGET = $target
 & .\.venv\Scripts\python.exe -c "import os; from huggingface_hub import snapshot_download; print(snapshot_download(os.environ['HF_REPO'], local_dir=os.environ['HF_TARGET']))"
+
+# Validate the checkpoint is an OpenVINO GenAI VLM (so VLMPipeline can load it)
+$markers = @("openvino_config.json", "openvino_model.xml", "openvino_language_model.xml")
+$found = $markers | Where-Object { Test-Path (Join-Path $target $_) }
+if (-not $found) {
+    throw "Downloaded folder does not look like an OpenVINO GenAI VLM: $target"
+}
 
 Write-Host ""
 Write-Host "Model -> $target"

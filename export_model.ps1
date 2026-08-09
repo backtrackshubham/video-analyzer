@@ -1,8 +1,8 @@
 # Export a Hugging Face VLM to OpenVINO IR (INT4) for the NPU, using a
-# separate export venv so the serving venv stays lean.
+# separate export venv so the runtime venv stays lean.
 param(
-    [string]$ModelId = "Qwen/Qwen2-VL-2B-Instruct",
-    [string]$OutDir = "$PSScriptRoot\models\qwen2-vl-2b-instruct-ov"
+    [string]$ModelId = "Qwen/Qwen2.5-VL-3B-Instruct",
+    [string]$OutDir = "$PSScriptRoot\models\qwen2.5-vl-3b-instruct-ov"
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,7 +21,7 @@ if (-not (Test-Path ".venv-export")) {
     --weight-format int4 `
     --sym `
     --ratio 1.0 `
-    --group-size 128 `
+    --group-size -1 `
     $OutDir
 
 Write-Host ""
