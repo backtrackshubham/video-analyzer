@@ -76,7 +76,7 @@ class NPUVlmCaptioner:
             "MIN_RESPONSE_LEN": 256,
             "CACHE_DIR": os.path.join(self.model_path, ".npucache"),
         }
-        self.pipe = genai.VLMPipeline(self.model_path, self.device, self.pipeline_config)
+        self.pipe = genai.VLMPipeline(self.model_path, self.device, **self.pipeline_config)
         self.gen_cfg = genai.GenerationConfig()
         self.gen_cfg.max_new_tokens = VLM_MAX_TOKENS
         self.gen_cfg.min_new_tokens = 2
