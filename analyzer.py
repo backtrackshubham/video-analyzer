@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -6,6 +7,12 @@ import threading
 from pathlib import Path
 
 from PIL import Image
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+log = logging.getLogger("analyzer")
 
 DEFAULT_DATA_ROOT = "shared_volume" if os.name == "nt" else "/data/shared"
 DATA_ROOT = os.environ.get("DATA_ROOT", DEFAULT_DATA_ROOT)
@@ -72,7 +79,7 @@ class NPUVlmCaptioner:
         self.model_path = resolve_model_dir(model)
         self.device = device
         hint = os.environ.get("VLM_GENERATE_HINT", "FAST_COMPILE")
-        print(f"[npu] compiling {self.model} on {self.device} (hint={hint})...", flush=True)
+        log.info("compiling %s on %s (hint=%s)...", self.model, self.device, hint)
         self.pipeline_config = {
             "GENERATE_HINT": hint,
             "MAX_PROMPT_LEN": 4096,
@@ -80,7 +87,7 @@ class NPUVlmCaptioner:
             "CACHE_DIR": os.path.join(self.model_path, ".npucache"),
         }
         self.pipe = genai.VLMPipeline(self.model_path, self.device, **self.pipeline_config)
-        print("[npu] pipeline ready", flush=True)
+        log.info("pipeline ready")
         self.gen_cfg = genai.GenerationConfig()
         self.gen_cfg.max_new_tokens = VLM_MAX_TOKENS
         self.gen_cfg.min_new_tokens = 2
@@ -129,11 +136,21 @@ class Analyzer:
         self.lock = threading.Lock()
 
     def analyze(self, clip_path, want_audio=False, max_frames=None, seconds_per_frame=None):
+        log.info(
+            "analyze request: clip=%s audio=%s secondsPerFrame=%s max_frames=%s",
+            clip_path,
+            want_audio,
+            seconds_per_frame,
+            max_frames,
+        )
         data_root = os.path.abspath(DATA_ROOT)
         if not os.path.abspath(clip_path).startswith(data_root + os.sep):
+            log.warning("path %s rejected (outside %s)", clip_path, data_root)
             raise ValueError(f"path must be inside {data_root}")
         if not os.path.isfile(clip_path):
+            log.warning("clip not found: %s", clip_path)
             raise FileNotFoundError(clip_path)
+        log.info("clip verified")
 
         interval = seconds_per_frame if seconds_per_frame else SAMPLE_INTERVAL
         if interval <= 0:
@@ -146,8 +163,10 @@ class Analyzer:
         analysis_file = os.path.join(out_dir, base + ".analysis.json")
 
         duration = get_duration(clip_path)
+        log.info("duration=%.1f s", duration)
 
         workdir = tempfile.mkdtemp(prefix="frames_")
+        log.info("extracting frames (interval=%.1fs, fps=%.3f) -> %s", interval, fps, workdir)
         extract_frames(clip_path, fps, workdir)
 
         frame_paths = sorted(
@@ -155,8 +174,11 @@ class Analyzer:
         )
         if max_frames is not None:
             frame_paths = frame_paths[:max_frames]
+            log.info("frame cap applied (max_frames=%d)", max_frames)
         elif duration > NO_CAP_DURATION:
             frame_paths = frame_paths[:MAX_FRAMES]
+            log.info("clip > %ds; frame cap applied (MAX_FRAMES=%d)", NO_CAP_DURATION, MAX_FRAMES)
+        log.info("total frames to caption: %d", len(frame_paths))
 
         result = {
             "clip": clip_path,
@@ -177,7 +199,7 @@ class Analyzer:
                 caption = self.captioner.caption(p)
                 result["frames"].append({"t": t, "caption": caption})
                 result["status"] = "running"
-                print(f"frame {i + 1}/{len(frame_paths)} t={t}s done", flush=True)
+                log.info("frame %d/%d t=%.1fs done (%d chars)", i + 1, len(frame_paths), t, len(caption))
                 self._save(result)
         finally:
             for fname in os.listdir(workdir):
@@ -189,11 +211,15 @@ class Analyzer:
                 os.rmdir(workdir)
             except OSError:
                 pass
+            log.info("cleaned workdir %s", workdir)
 
         if want_audio:
+            log.info("transcribing audio (%s)", self.transcriber.size)
             result["transcript"] = self.transcriber.transcribe(clip_path)
+            log.info("transcript: %s", (result["transcript"] or "")[:120])
         result["status"] = "done"
         self._save(result)
+        log.info("analysis complete -> %s (%d frames, %.1fs clip)", analysis_file, len(frame_paths), duration)
         return result
 
     @staticmethod
