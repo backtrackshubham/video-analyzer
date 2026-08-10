@@ -98,15 +98,31 @@ class NPUVlmCaptioner:
         return {"device": self.device, "model": self.model, "model_path": self.model_path}
 
     def caption(self, image_path, prompt=FRAME_QUESTION):
+        import time
+
         import openvino as ov
 
+        t0 = time.perf_counter()
         pil = Image.open(image_path).convert("RGB")
+        t1 = time.perf_counter()
         img_tensor = ov.Tensor(self.np.array(pil))
+        t2 = time.perf_counter()
         try:
             out = self.pipe.generate(prompt, images=[img_tensor], generation_config=self.gen_cfg)
         except TypeError:
             out = self.pipe.generate(prompt, [img_tensor], self.gen_cfg)
-        return str(out).strip()
+        t3 = time.perf_counter()
+        text = str(out).strip()
+        t4 = time.perf_counter()
+        log.info(
+            "\n  [timing] load=%.1fms tensor=%.1fms GENERATE=%.1fms str=%.1fms  total=%.1fs",
+            (t1 - t0) * 1e3,
+            (t2 - t1) * 1e3,
+            (t3 - t2) * 1e3,
+            (t4 - t3) * 1e3,
+            t4 - t0,
+        )
+        return text
 
 
 class Transcriber:
@@ -193,8 +209,16 @@ class Analyzer:
             "transcript": None,
             "status": "running",
         }
+        import time as _time
+        frame_gap_t0 = None
         try:
             for i, p in enumerate(frame_paths):
+                if frame_gap_t0 is not None:
+                    log.info(
+                        "  [gap] last-iteration overhead: %+.1fs (outside caption)",
+                        _time.perf_counter() - frame_gap_t0,
+                    )
+                frame_gap_t0 = _time.perf_counter()
                 t = round(i * interval, 2)
                 caption = self.captioner.caption(p)
                 result["frames"].append({"t": t, "caption": caption})
