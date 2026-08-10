@@ -128,7 +128,7 @@ class NPUVlmCaptioner:
         self._stream_n = 0
         t0 = time.perf_counter()
         pil = Image.open(image_path).convert("RGB")
-        target = int(os.environ.get("VLM_IMAGE_SIZE", "0") or 0)
+        target = int(os.environ.get("VLM_IMAGE_SIZE", "448") or "448")
         if target:
             pil.thumbnail((target, target), Image.LANCZOS)
             log.info(
