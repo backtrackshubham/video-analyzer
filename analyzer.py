@@ -112,8 +112,7 @@ class NPUVlmCaptioner:
                 )
             return False
 
-        self.gen_cfg.streamer = _streamer
-        self.gen_cfg.is_streaming = True
+        self._streamer = _streamer
         log.info("streamer profiler active (tokens logged for first 2 frames)")
 
     def health(self):
@@ -125,15 +124,22 @@ class NPUVlmCaptioner:
         import openvino as ov
 
         self._stream_frame += 1
+        self._stream_t0 = None
+        self._stream_n = 0
         t0 = time.perf_counter()
         pil = Image.open(image_path).convert("RGB")
         t1 = time.perf_counter()
         img_tensor = ov.Tensor(self.np.array(pil))
         t2 = time.perf_counter()
         try:
-            out = self.pipe.generate(prompt, images=[img_tensor], generation_config=self.gen_cfg)
+            out = self.pipe.generate(
+                prompt,
+                images=[img_tensor],
+                generation_config=self.gen_cfg,
+                streamer=self._streamer,
+            )
         except TypeError:
-            out = self.pipe.generate(prompt, [img_tensor], self.gen_cfg)
+            out = self.pipe.generate(prompt, [img_tensor], self.gen_cfg, self._streamer)
         t3 = time.perf_counter()
         text = str(out).strip()
         t4 = time.perf_counter()
