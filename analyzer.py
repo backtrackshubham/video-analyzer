@@ -90,9 +90,9 @@ class NPUVlmCaptioner:
         log.info("pipeline ready")
         self.gen_cfg = genai.GenerationConfig()
         self.gen_cfg.max_new_tokens = VLM_MAX_TOKENS
-        self.gen_cfg.min_new_tokens = 2
-        self.gen_cfg.temperature = 0.3
-        self.gen_cfg.top_p = 0.9
+        # Greedy decode is essential on NPU: temperature/top_p/min_new_tokens
+        # force sampling on CPU, which falls back to ~1.3 s/token (see timing logs).
+        # Leave do_sample off (default) and do not set temperature/top_p/min_new_tokens.
 
     def health(self):
         return {"device": self.device, "model": self.model, "model_path": self.model_path}
