@@ -94,22 +94,27 @@ class NPUVlmCaptioner:
         # Greedy decode is essential on NPU: temperature/top_p/min_new_tokens
         # force sampling on CPU, which falls back to ~1.3 s/token (see timing logs).
         # Leave do_sample off (default) and do not set temperature/top_p/min_new_tokens.
-        if os.environ.get("VLM_PROFILE_STREAMER") == "1":
-            self._stream_t0 = None
-            self._stream_n = 0
+        self._stream_frame = 0
+        self._stream_t0 = None
+        self._stream_n = 0
 
-            def _streamer(subword):
-                if self._stream_t0 is None:
-                    self._stream_t0 = time.perf_counter()
-                self._stream_n += 1
+        def _streamer(subword):
+            if self._stream_t0 is None:
+                self._stream_t0 = time.perf_counter()
+            self._stream_n += 1
+            if self._stream_frame <= 2 and self._stream_n <= 40:
                 elapsed = time.perf_counter() - self._stream_t0
-                if self._stream_n <= 40:
-                    log.info("[stream] token %2d at +%.1fs  first_token_delta=%.1fs", self._stream_n, elapsed, elapsed if self._stream_n == 1 else -1.0)
-                return False
+                log.info(
+                    "[stream] frame#%d token %2d at +%.1fs",
+                    self._stream_frame,
+                    self._stream_n,
+                    elapsed,
+                )
+            return False
 
-            self.gen_cfg.streamer = _streamer
-            self.gen_cfg.is_streaming = True
-            log.info("streamer profiler enabled (VLM_PROFILE_STREAMER=1)")
+        self.gen_cfg.streamer = _streamer
+        self.gen_cfg.is_streaming = True
+        log.info("streamer profiler active (tokens logged for first 2 frames)")
 
     def health(self):
         return {"device": self.device, "model": self.model, "model_path": self.model_path}
@@ -119,6 +124,7 @@ class NPUVlmCaptioner:
 
         import openvino as ov
 
+        self._stream_frame += 1
         t0 = time.perf_counter()
         pil = Image.open(image_path).convert("RGB")
         t1 = time.perf_counter()
