@@ -114,11 +114,13 @@ class NPUVlmCaptioner:
         t3 = time.perf_counter()
         text = str(out).strip()
         t4 = time.perf_counter()
+        tok_s = (len(text) / 4) / max((t3 - t2), 1e-6)
         log.info(
-            "\n  [timing] load=%.1fms tensor=%.1fms GENERATE=%.1fms str=%.1fms  total=%.1fs",
+            "\n  [timing] load=%.1fms tensor=%.1fms GENERATE=%.1fs (~%.1f tok/s) str=%.1fms  total=%.1fs",
             (t1 - t0) * 1e3,
             (t2 - t1) * 1e3,
-            (t3 - t2) * 1e3,
+            t3 - t2,
+            tok_s,
             (t4 - t3) * 1e3,
             t4 - t0,
         )
