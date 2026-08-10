@@ -128,6 +128,15 @@ class NPUVlmCaptioner:
         self._stream_n = 0
         t0 = time.perf_counter()
         pil = Image.open(image_path).convert("RGB")
+        target = int(os.environ.get("VLM_IMAGE_SIZE", "0") or 0)
+        if target:
+            pil.thumbnail((target, target), Image.LANCZOS)
+            log.info(
+                "  [img] downscaled to %dx%d (VLM_IMAGE_SIZE=%d)",
+                pil.size[0],
+                pil.size[1],
+                target,
+            )
         t1 = time.perf_counter()
         img_tensor = ov.Tensor(self.np.array(pil))
         t2 = time.perf_counter()
