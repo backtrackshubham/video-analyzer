@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -8,12 +9,19 @@ import time
 
 import requests
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+log = logging.getLogger("analyzer")
+
 DATA_ROOT = os.environ.get("DATA_ROOT", "/data/shared")
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:3b")
 OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "600"))
-SAMPLE_FPS = float(os.environ.get("SAMPLE_FPS", "1.0"))
+SAMPLE_INTERVAL = float(os.environ.get("SAMPLE_INTERVAL", "3.0"))
 MAX_FRAMES = int(os.environ.get("MAX_FRAMES", "60"))
+NO_CAP_DURATION = float(os.environ.get("NO_CAP_DURATION", "600"))
 AUDIO_MODEL = os.environ.get("AUDIO_MODEL", "off")
 FRAME_QUESTION = os.environ.get(
     "FRAME_QUESTION",
@@ -108,46 +116,83 @@ class Analyzer:
         self.transcriber = Transcriber(AUDIO_MODEL)
         self.lock = threading.Lock()
 
-    def analyze(self, clip_path, want_audio=False, max_frames=None):
-        if not clip_path.startswith(DATA_ROOT + "/"):
-            raise ValueError(f"path must be inside {DATA_ROOT}")
+    def analyze(self, clip_path, want_audio=False, max_frames=None, seconds_per_frame=None):
+        log.info(
+            "analyze request: clip=%s audio=%s secondsPerFrame=%s max_frames=%s",
+            clip_path,
+            want_audio,
+            seconds_per_frame,
+            max_frames,
+        )
+        data_root = os.path.abspath(DATA_ROOT)
+        if not os.path.abspath(clip_path).startswith(data_root + os.sep):
+            log.warning("path %s rejected (outside %s)", clip_path, data_root)
+            raise ValueError(f"path must be inside {data_root}")
         if not os.path.isfile(clip_path):
+            log.warning("clip not found: %s", clip_path)
             raise FileNotFoundError(clip_path)
+        log.info("clip verified")
+
+        interval = seconds_per_frame if seconds_per_frame else SAMPLE_INTERVAL
+        if interval <= 0:
+            raise ValueError("secondsPerFrame must be > 0")
+        fps = 1.0 / interval
 
         base = os.path.splitext(os.path.basename(clip_path))[0]
-        out_dir = os.path.join(DATA_ROOT, "analysis")
+        out_dir = os.path.join(data_root, "analysis")
         os.makedirs(out_dir, exist_ok=True)
         analysis_file = os.path.join(out_dir, base + ".analysis.json")
 
         duration = get_duration(clip_path)
+        log.info("duration=%.1f s", duration)
 
         workdir = tempfile.mkdtemp(prefix="frames_")
-        extract_frames(clip_path, SAMPLE_FPS, workdir)
+        log.info("extracting frames (interval=%.1fs, fps=%.3f) -> %s", interval, fps, workdir)
+        extract_frames(clip_path, fps, workdir)
 
         frame_paths = sorted(
             os.path.join(workdir, f) for f in os.listdir(workdir) if f.endswith(".jpg")
         )
-        if max_frames:
+        if max_frames is not None:
             frame_paths = frame_paths[:max_frames]
+            log.info("frame cap applied (max_frames=%d)", max_frames)
+        elif duration > NO_CAP_DURATION:
+            frame_paths = frame_paths[:MAX_FRAMES]
+            log.info("clip > %ds; frame cap applied (MAX_FRAMES=%d)", NO_CAP_DURATION, MAX_FRAMES)
+        log.info("total frames to caption: %d", len(frame_paths))
 
         result = {
             "clip": clip_path,
             "analysis_file": analysis_file,
             "duration": round(duration, 2),
             "model": f"ollama:{self.captioner.model}",
-            "sample_fps": SAMPLE_FPS,
+            "sample_interval": interval,
             "total_frames": len(frame_paths),
             "frames": [],
             "transcript": None,
             "status": "running",
         }
+        frame_gap_t0 = None
         try:
             for i, p in enumerate(frame_paths):
-                t = round(i / SAMPLE_FPS, 2)
+                if frame_gap_t0 is not None:
+                    log.info(
+                        "  [gap] last-iteration overhead: %+.1fs (outside caption)",
+                        time.perf_counter() - frame_gap_t0,
+                    )
+                frame_gap_t0 = time.perf_counter()
+                t = round(i * interval, 2)
                 caption = self.captioner.caption(p)
                 result["frames"].append({"t": t, "caption": caption})
                 result["status"] = "running"
-                print(f"frame {i + 1}/{len(frame_paths)} t={t}s done", flush=True)
+                log.info(
+                    "frame %d/%d t=%.1fs done (%d chars) [caption=%.1fs]",
+                    i + 1,
+                    len(frame_paths),
+                    t,
+                    len(caption),
+                    time.perf_counter() - frame_gap_t0,
+                )
                 self._save(result)
         finally:
             for fname in os.listdir(workdir):
@@ -159,11 +204,15 @@ class Analyzer:
                 os.rmdir(workdir)
             except OSError:
                 pass
+            log.info("cleaned workdir %s", workdir)
 
         if want_audio:
+            log.info("transcribing audio (%s)", self.transcriber.size)
             result["transcript"] = self.transcriber.transcribe(clip_path)
+            log.info("transcript: %s", (result["transcript"] or "")[:120])
         result["status"] = "done"
         self._save(result)
+        log.info("analysis complete -> %s (%d frames, %.1fs clip)", analysis_file, len(frame_paths), duration)
         return result
 
     @staticmethod
