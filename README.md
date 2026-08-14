@@ -14,7 +14,7 @@ the text to a text-LLM (Gemini) for the final "what's happening" summary.
 | File | Purpose |
 | --- | --- |
 | `analyzer.py` | Ollama captioner, frame extraction, analysis pipeline |
-| `main.py` | FastAPI app (`GET /health`, `POST /analyze`) |
+| `main.py` | FastAPI app (`GET /health`, `POST /analyze`, `POST /analyze/upload`) |
 | `requirements.txt` | Python deps for the analyzer container |
 | `Dockerfile` | Analyzer container (no torch; talks to Ollama over HTTP) |
 | `docker-compose.yml` | `ollama` (GPU-reserved) + `analyzer` (:31027) |
@@ -36,9 +36,12 @@ curl localhost:31027/health
 cp /path/to/clip.mp4 shared_volume/clips/
 curl -X POST localhost:31027/analyze \
   -H 'Content-Type: application/json' \
-  -d '{"path": "/data/shared/clips/clip.mp4", "audio": false, "max_frames": 60}'
+  -d '{"path": "/data/shared/clips/clip.mp4", "audio": false, "max_frames": null, "secondsPerFrame": 3.0}'
+# or upload directly (no need to pre-place the clip):
+curl -F "video=@/path/to/clip.mp4" -F "secondsPerFrame=3.0" localhost:31027/analyze/upload
 # -> shared_volume/analysis/clip.analysis.json
 ```
 
-Tunables: `OLLAMA_MODEL`, `OLLAMA_HOST`, `SAMPLE_FPS`, `MAX_FRAMES`,
-`OLLAMA_TIMEOUT`, `FRAME_QUESTION`.
+Tunables: `OLLAMA_MODEL`, `OLLAMA_HOST`, `SAMPLE_INTERVAL` (s between frames,
+default 3.0), `MAX_FRAMES` (applies only to clips > 10 min), `NO_CAP_DURATION`,
+`OLLAMA_TIMEOUT`, `FRAME_QUESTION`, `ANALYZER_PORT`.
