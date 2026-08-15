@@ -8,6 +8,7 @@ import threading
 import time
 
 import requests
+from PIL import Image
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,6 +20,11 @@ DATA_ROOT = os.environ.get("DATA_ROOT", "/data/shared")
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:3b")
 OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "600"))
+# Full-res frames get inflated to ~3500 vision tokens by Ollama (batches of
+# 512, ~1.8s each on a throttled 6GB GPU) — the prefill bottleneck. Downscale
+# to a longest-edge of VLM_IMAGE_SIZE before sending. 448 = parity with the
+# other branches; 0 disables.
+VLM_IMAGE_SIZE = int(os.environ.get("VLM_IMAGE_SIZE", "448"))
 SAMPLE_INTERVAL = float(os.environ.get("SAMPLE_INTERVAL", "3.0"))
 MAX_FRAMES = int(os.environ.get("MAX_FRAMES", "60"))
 NO_CAP_DURATION = float(os.environ.get("NO_CAP_DURATION", "600"))
@@ -49,9 +55,14 @@ def extract_frames(video_path, fps, outdir):
     run(["ffmpeg", "-v", "error", "-i", video_path, "-vf", f"fps={fps}", "-q:v", "2", f"{outdir}/%05d.jpg"])
 
 
-def img_b64(path):
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("ascii")
+def img_b64(path, max_edge=VLM_IMAGE_SIZE):
+    img = Image.open(path).convert("RGB")
+    if max_edge:
+        img.thumbnail((max_edge, max_edge), Image.LANCZOS)
+        log.info("[img] downscaled to %dx%d (VLM_IMAGE_SIZE=%d)", img.size[0], img.size[1], max_edge)
+    with __import__("io").BytesIO() as buf:
+        img.save(buf, "JPEG", quality=90)
+        return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 class OllamaCaptioner:

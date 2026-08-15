@@ -33,6 +33,7 @@ services:
       AUDIO_MODEL: off
       SAMPLE_INTERVAL: "3.0"
       MAX_FRAMES: "60"
+      VLM_IMAGE_SIZE: "448"
       OLLAMA_TIMEOUT: "600"
     volumes:
       - ./shared_volume:/data/shared

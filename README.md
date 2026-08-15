@@ -44,4 +44,6 @@ curl -F "video=@/path/to/clip.mp4" -F "secondsPerFrame=3.0" localhost:31027/anal
 
 Tunables: `OLLAMA_MODEL`, `OLLAMA_HOST`, `SAMPLE_INTERVAL` (s between frames,
 default 3.0), `MAX_FRAMES` (applies only to clips > 10 min), `NO_CAP_DURATION`,
-`OLLAMA_TIMEOUT`, `FRAME_QUESTION`, `ANALYZER_PORT`.
+`VLM_IMAGE_SIZE` (longest edge px fed to the VLM; default 448 to avoid
+full-res ~3500-token prefill, 0 = keep original), `OLLAMA_TIMEOUT`,
+`FRAME_QUESTION`, `ANALYZER_PORT`.
