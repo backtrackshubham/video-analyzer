@@ -1,0 +1,36 @@
+name: alienware-video-analyzer-allinone
+
+# Single-container alternative to docker-compose.yml: builds
+# Dockerfile.allinone (Ollama + qwen2.5vl:3b + FastAPI analyzer) and runs it
+# with GPU reservation. Use either this or the two-service compose, not both.
+#
+#   docker compose -f docker-compose.allinone.yml up -d --build
+#   curl localhost:31027/health
+
+services:
+  analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile.allinone
+    image: alien-analyzer-allinone:local
+    container_name: alien-analyzer-allinone
+    restart: unless-stopped
+    ports:
+      - "31027:8000"
+      - "11434:11434"
+    environment:
+      OLLAMA_HOST: http://localhost:11434
+      OLLAMA_MODEL: qwen2.5vl:3b
+      AUDIO_MODEL: off
+      SAMPLE_INTERVAL: "3.0"
+      MAX_FRAMES: "60"
+      OLLAMA_TIMEOUT: "600"
+    volumes:
+      - ./shared_volume:/data/shared
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
