@@ -1,0 +1,37 @@
+# All-in-one analyzer image: Ollama + qwen2.5vl:3b (baked in at build) +
+# the FastAPI analyzer. One container, GPU-reserved, port 31027.
+#
+#   docker build -f Dockerfile.allinone -t alien-analyzer-allinone:local .
+#   docker run -d --gpus all -p 31027:8000 -p 11434:11434 \
+#       -v "$PWD/shared_volume:/data/shared" \
+#       -e OLLAMA_HOST=http://localhost:11434 \
+#       --name alien-analyzer alien-analyzer-allinone:local
+FROM ollama/ollama:latest
+
+ENV OLLAMA_KEEP_ALIVE=10m \
+    OLLAMA_MODEL=qwen2.5vl:3b \
+    DATA_ROOT=/data/shared \
+    ANALYZER_PORT=8000
+
+# switch to root for apt + runtime so the analyzer can write the shared volume
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt .
+RUN python3 -m pip install --no-cache-dir -r requirements.txt
+
+COPY analyzer.py main.py ./
+
+# Bake the vision model into the image so first run needs no download.
+RUN ollama serve & sleep 8 \
+    && ollama pull "$OLLAMA_MODEL" \
+    && ollama stop "$OLLAMA_MODEL" || true
+
+USER root
+EXPOSE 11434 8000
+
+# start ollama in the background, then the analyzer
+CMD ["sh", "-c", "ollama serve & sleep 6 && python3 main.py"]
